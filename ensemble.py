@@ -5,6 +5,7 @@ from tpot.config.regressor import regressor_config_dict
 from sklearn.datasets import load_boston
 from sklearn import linear_model, model_selection
 from sklearn.model_selection import train_test_split
+from sklearn.metrics.scorer import check_scoring
 import numpy as np
 import multiprocessing as mult
 import xgboost
@@ -15,22 +16,32 @@ import time
 i = 0
 ests = []
 
-def scorer(y_pred, y_true):
-    return -np.mean((y_pred - y_true) ** 2)
+def scorer(est, X, y_true):
+    return -np.mean((est.predict(X) - y_true) ** 2)
 
-def fit_predict(est, X_train, y_train, X_test):
-    est.fit(X_train, y_train)
-    return (est, est.predict(X_test))
+from stopit import ThreadingTimeout
+
+def fit_predict_score(est, X_train, y_train, X_test, y_test, scoring_fn):
+    with ThreadingTimeout(10) as ctx:
+        est.fit(X_train, y_train)
+        preds = est.predict(X_test)
+        score = check_scoring(est, scoring=scoring_fn)(est, X, y)
+        res = (est, preds, score)
+
+    if ctx.state == ctx.EXECUTED:
+        return res
+    else:
+        print('timed out')
+        return (est, np.array([-10 for _ in X_test]), -float('inf'))
 
 def predict(est, X):
     return est.predict(X)
 
 class EnsembleTPOTBase(TPOTBase):
-    # def _check_periodic_pipeline(self):
-    #     super()._check_periodic_pipeline()
-    #     ensemble_pred = self.ensemble_predict(X_test)
-    #     print("ensemble pred score:", scorer(ensemble_pred, y_test))
-    #     # print(tpot.ensemble.coef_)
+    def _check_periodic_pipeline(self):
+        super()._check_periodic_pipeline()
+        # print("ensemble pred score:", scorer(EnsemblePredictor(self), X_test, y_test))
+        # print(tpot.ensemble.coef_)
     def _evaluate_individuals(self, individuals, features, target, sample_weight=None, groups=None):
         operator_counts, eval_individuals_str, sklearn_pipeline_list, stats_dicts = self._preprocess_individuals(individuals)
 
@@ -40,23 +51,33 @@ class EnsembleTPOTBase(TPOTBase):
             self.cv = model_selection.KFold(self.cv)
 
         scores = []
+        ensembles = []
+        coefs = []
 
         with mult.Pool(processes) as pool:
           for train, test in self.cv.split(features, target, groups):
               X_train, y_train, X_test, y_test = features[train], target[train], features[test], target[test]
-              args = [(ind, X_train, y_train, X_test) for ind in sklearn_pipeline_list]
-              estimators, predictions = zip(*pool.starmap(fit_predict, args))
-              predictions = np.array(predictions).T
-              ensembler = linear_model.Lasso(fit_intercept=False, positive=True, selection='random')
+              args = [(ind, X_train, y_train, X_test, y_test, self.scoring_function) for ind in sklearn_pipeline_list]
+              estimators, predictions, s = zip(*pool.starmap(fit_predict_score, args))
+              best_estimators_i = np.argpartition(s, -5)[-5:]
+              best_estimators = np.array(estimators)[best_estimators_i]
+              predictions = np.array(predictions)[best_estimators_i].T
+              ensembler = linear_model.Lasso(alpha=0.01, fit_intercept=False, positive=True, selection='random')
               ensembler.fit(predictions, y_test)
               self.ensemble = ensembler
-              self.base_estimators = estimators
-              scores.append(ensembler.coef_)
+              self.base_estimators = best_estimators
+              score_diff = np.max(s) - np.min(s)
+              coef = np.zeros(len(estimators))
+              coef[best_estimators_i] = ensembler.coef_
+              s = np.array(s) + score_diff * 100. * coef
+              scores.append(s)
+              coefs.append(coef)
 
         import sys
         # sys.stdout.write("\nhey" + str(len(individuals)) + "\n")
+        ensembler = linear_model.Lasso(alpha=0.01, fit_intercept=False, positive=True, selection='random')
         result_score_list = np.mean(np.array(scores), axis=0)
-        ensembler.coef_ = result_score_list
+        ensembler.coef_ = np.mean(np.array(coefs), axis=0)
 
         self._update_evaluated_individuals_(result_score_list, eval_individuals_str, operator_counts, stats_dicts)
 
@@ -70,6 +91,12 @@ class EnsembleTPOTBase(TPOTBase):
             predictions = pool.starmap(predict, [(est, X) for est in self.base_estimators])
             predictions = np.array(predictions).T
             return self.ensemble.predict(predictions)
+
+class EnsemblePredictor():
+    def __init__(self, tpot):
+        self.tpot = tpot
+    def predict(self, X):
+        return self.tpot.ensemble_predict(X)
 
 class EnsembleTPOTClassifier(EnsembleTPOTBase):
     """TPOT estimator for classification problems."""
@@ -107,8 +134,8 @@ for i, regression_dataset in enumerate(regression_dataset_names):
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.75, test_size=0.25)
     print("name:", regression_dataset, "instances:", len(X), "features:", len(X[0]))
-    ensemble_tpot = EnsembleTPOTRegressor(generations=10, population_size=10, verbosity=1, n_jobs=-1)
-    normal_tpot = TPOTRegressor(generations=10, population_size=10, verbosity=1, n_jobs=-1)
+    ensemble_tpot = EnsembleTPOTRegressor(generations=100, population_size=100, verbosity=1, n_jobs=-1, scoring=scorer)
+    normal_tpot = TPOTRegressor(generations=100, population_size=100, verbosity=1, n_jobs=-1, scoring=scorer)
     xgb = xgboost.XGBRegressor()
 
     try:
@@ -119,22 +146,16 @@ for i, regression_dataset in enumerate(regression_dataset_names):
         xgb.fit(X_train, y_train)
         print("fitted xgboost")
 
-        ensemble_pred = ensemble_tpot.ensemble_predict(X_test)
-        ensemble_score = scorer(ensemble_pred, y_test)
-
-        top_pred = ensemble_tpot.predict(X_test)
-        top_score = scorer(top_pred, y_test)
-
-        normal_pred = normal_tpot.predict(X_test)
-        normal_score = scorer(normal_pred, y_test)
-
-        xgb_pred = xgb.predict(X_test)
-        xgb_score = scorer(xgb_pred, y_test)
+        xgb_score = scorer(xgb, X_test, y_test)
+        normal_score = scorer(normal_tpot, X_test, y_test)
+        top_score = scorer(ensemble_tpot, X_test, y_test)
+        ensemble_score = scorer(EnsemblePredictor(ensemble_tpot), X_test, y_test)
 
         line = ','.join(str(x) for x in [regression_dataset, len(X), len(X[0]), ensemble_score, top_score, normal_score, xgb_score]) + '\n'
         print(line)
         x = open(f, 'a').write(line)
     except Exception as e:
+        raise e
         print(e)
 
 #     # print(pred - y_train)
