@@ -1,3 +1,5 @@
+The file to run is `ensemble.py`, which outputs `results[timestamp].csv`. This is the original TPOT README:
+
 Master status: [![Master Build Status - Mac/Linux](https://travis-ci.org/EpistasisLab/tpot.svg?branch=master)](https://travis-ci.org/EpistasisLab/tpot)
 [![Master Build Status - Windows](https://ci.appveyor.com/api/projects/status/b7bmpwpkjhifrm7v/branch/master?svg=true)](https://ci.appveyor.com/project/weixuanfu/tpot?branch=master)
 [![Master Code Health](https://landscape.io/github/EpistasisLab/tpot/master/landscape.svg?style=flat)](https://landscape.io/github/EpistasisLab/tpot/master)
