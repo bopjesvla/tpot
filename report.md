@@ -54,7 +54,7 @@ Initially, I attempted to implement the Olson2 algorithm in a way that would all
 
 # Implementation
 
-The ensembling functionality was implemented in a fork of TPOT, which is [publicly available](https://github.com/bopjesvla/tpot).
+The ensembling functionality was implemented in a fork of TPOT, which is [publicly available](https://github.com/bopjesvla/tpot/tree/cleanslate).
 
 Every generation, the training data is partitioned into multiple train-test splits according to a user-provided cross-validation object, which defaults to five-fold cross-validation.
 
