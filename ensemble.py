@@ -40,7 +40,7 @@ def predict(est, X):
 class EnsembleTPOTBase(TPOTBase):
     def _check_periodic_pipeline(self):
         super()._check_periodic_pipeline()
-        # print("ensemble pred score:", scorer(EnsemblePredictor(self), X_test, y_test))
+        print("ensemble pred score:", scorer(EnsemblePredictor(self), X_test, y_test))
         # print(tpot.ensemble.coef_)
     def _evaluate_individuals(self, individuals, features, target, sample_weight=None, groups=None):
         operator_counts, eval_individuals_str, sklearn_pipeline_list, stats_dicts = self._preprocess_individuals(individuals)
@@ -57,27 +57,21 @@ class EnsembleTPOTBase(TPOTBase):
         with mult.Pool(processes) as pool:
           for train, test in self.cv.split(features, target, groups):
               X_train, y_train, X_test, y_test = features[train], target[train], features[test], target[test]
+              print(X_train.shape)
               args = [(ind, X_train, y_train, X_test, y_test, self.scoring_function) for ind in sklearn_pipeline_list]
               estimators, predictions, s = zip(*pool.starmap(fit_predict_score, args))
-              best_estimators_i = np.argpartition(s, -5)[-5:]
-              best_estimators = np.array(estimators)[best_estimators_i]
-              predictions = np.array(predictions)[best_estimators_i].T
+              # best_estimators_i = np.argpartition(s, -5)[-5:]
+              # best_estimators = np.array(estimators)[best_estimators_i]
+              predictions = np.array(predictions).T
               ensembler = linear_model.Lasso(alpha=0.01, fit_intercept=False, positive=True, selection='random')
               ensembler.fit(predictions, y_test)
               self.ensemble = ensembler
-              self.base_estimators = best_estimators
-              score_diff = np.max(s) - np.min(s)
-              coef = np.zeros(len(estimators))
-              coef[best_estimators_i] = ensembler.coef_
-              s = np.array(s) + score_diff * 100. * coef
-              scores.append(s)
-              coefs.append(coef)
+              scores.append(ensembler.coef_)
 
         import sys
         # sys.stdout.write("\nhey" + str(len(individuals)) + "\n")
-        ensembler = linear_model.Lasso(alpha=0.01, fit_intercept=False, positive=True, selection='random')
         result_score_list = np.mean(np.array(scores), axis=0)
-        ensembler.coef_ = np.mean(np.array(coefs), axis=0)
+        ensembler.coef_ = result_score_list
 
         self._update_evaluated_individuals_(result_score_list, eval_individuals_str, operator_counts, stats_dicts)
 

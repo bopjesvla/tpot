@@ -1228,9 +1228,9 @@ class TPOTBase(BaseEstimator):
                                                                                              individual.statistics)
                 self._update_pbar(pbar_msg='Invalid pipeline encountered. Skipping its evaluation.')
             # Check if the individual was evaluated before
-            elif individual_str in self.evaluated_individuals_:
-                self._update_pbar(pbar_msg=('Pipeline encountered that has previously been evaluated during the '
-                                            'optimization process. Using the score from the previous evaluation.'))
+            # elif individual_str in self.evaluated_individuals_:
+            #     self._update_pbar(pbar_msg=('Pipeline encountered that has previously been evaluated during the '
+            #                                 'optimization process. Using the score from the previous evaluation.'))
             else:
                 try:
                     # Transform the tree expression into an sklearn pipeline
